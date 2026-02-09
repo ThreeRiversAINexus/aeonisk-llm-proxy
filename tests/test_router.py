@@ -254,6 +254,46 @@ class TestAutoRouting:
         assert result == RoutingStrategy.DIRECT
 
 
+class TestDirectOnlyProviders:
+    """Test that direct-only providers (no batch API) always route DIRECT."""
+
+    def test_grok_always_direct(self):
+        router = RequestRouter()
+        req = make_request(provider=LLMProvider.GROK, model="grok-3")
+        assert router.route(req) == RoutingStrategy.DIRECT
+
+    def test_gemini_always_direct(self):
+        router = RequestRouter()
+        req = make_request(provider=LLMProvider.GEMINI, model="gemini-2.0-flash")
+        assert router.route(req) == RoutingStrategy.DIRECT
+
+    def test_deepinfra_always_direct(self):
+        router = RequestRouter()
+        req = make_request(provider=LLMProvider.DEEPINFRA, model="meta-llama/Llama-3.3-70B-Instruct")
+        assert router.route(req) == RoutingStrategy.DIRECT
+
+    def test_direct_only_overrides_low_priority(self):
+        """Even LOW priority on a direct-only provider stays DIRECT."""
+        config = ProxyConfig(low_priority_always_batch=True)
+        router = RequestRouter(config)
+        req = make_request(
+            provider=LLMProvider.GROK,
+            model="grok-3",
+            priority=RequestPriority.LOW,
+        )
+        assert router.route(req) == RoutingStrategy.DIRECT
+
+    def test_direct_only_overrides_explicit_batch_strategy(self):
+        """Explicit batch strategy on a direct-only provider still routes DIRECT."""
+        router = RequestRouter()
+        req = make_request(
+            provider=LLMProvider.DEEPINFRA,
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            strategy=RoutingStrategy.BATCH,
+        )
+        assert router.route(req) == RoutingStrategy.DIRECT
+
+
 class TestShouldFlushNow:
     """Test should_flush_now helper."""
 

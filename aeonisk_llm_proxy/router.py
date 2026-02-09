@@ -15,6 +15,7 @@ from .models import (
     RequestPriority,
     RoutingRule,
     ProxyConfig,
+    BATCH_PROVIDERS,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,14 @@ class RequestRouter:
         Returns:
             Routing strategy (DIRECT or BATCH)
         """
+        # 0. Direct-only providers (no batch API) always go direct
+        if request.provider not in BATCH_PROVIDERS:
+            logger.debug(
+                f"Request {request.request_id}: provider {request.provider.value} "
+                f"has no batch API \u2192 DIRECT"
+            )
+            return RoutingStrategy.DIRECT
+
         # 1. Check explicit strategy override
         if request.strategy != RoutingStrategy.AUTO:
             logger.debug(

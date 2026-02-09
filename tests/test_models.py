@@ -16,6 +16,7 @@ from aeonisk_llm_proxy.models import (
     ProxyConfig,
     ProxyStats,
     HealthCheck,
+    BATCH_PROVIDERS,
 )
 
 
@@ -42,11 +43,57 @@ class TestEnums:
     def test_llm_provider_values(self):
         assert LLMProvider.OPENAI == "openai"
         assert LLMProvider.ANTHROPIC == "anthropic"
+        assert LLMProvider.GROK == "grok"
+        assert LLMProvider.GEMINI == "gemini"
+        assert LLMProvider.DEEPINFRA == "deepinfra"
 
     def test_enum_from_string(self):
         assert LLMProvider("openai") == LLMProvider.OPENAI
+        assert LLMProvider("grok") == LLMProvider.GROK
+        assert LLMProvider("gemini") == LLMProvider.GEMINI
+        assert LLMProvider("deepinfra") == LLMProvider.DEEPINFRA
         assert RequestPriority("high") == RequestPriority.HIGH
         assert RoutingStrategy("batch") == RoutingStrategy.BATCH
+
+
+class TestBatchProviders:
+    """Test BATCH_PROVIDERS constant."""
+
+    def test_only_openai_and_anthropic_support_batch(self):
+        assert LLMProvider.OPENAI in BATCH_PROVIDERS
+        assert LLMProvider.ANTHROPIC in BATCH_PROVIDERS
+        assert LLMProvider.GROK not in BATCH_PROVIDERS
+        assert LLMProvider.GEMINI not in BATCH_PROVIDERS
+        assert LLMProvider.DEEPINFRA not in BATCH_PROVIDERS
+
+
+class TestNewProviderRequests:
+    """Test creating requests for new providers."""
+
+    def test_grok_request(self):
+        req = LLMRequest(
+            provider=LLMProvider.GROK,
+            model="grok-3",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        assert req.provider == LLMProvider.GROK
+        assert req.model == "grok-3"
+
+    def test_gemini_request(self):
+        req = LLMRequest(
+            provider=LLMProvider.GEMINI,
+            model="gemini-2.0-flash",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        assert req.provider == LLMProvider.GEMINI
+
+    def test_deepinfra_request(self):
+        req = LLMRequest(
+            provider=LLMProvider.DEEPINFRA,
+            model="meta-llama/Llama-3.3-70B-Instruct",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+        assert req.provider == LLMProvider.DEEPINFRA
 
 
 class TestLLMRequest:

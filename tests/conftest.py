@@ -61,6 +61,39 @@ def low_priority_request():
 
 
 @pytest.fixture
+def grok_request():
+    """Create a sample Grok request."""
+    return LLMRequest(
+        request_id="test-req-grok",
+        provider=LLMProvider.GROK,
+        model="grok-3",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+
+@pytest.fixture
+def gemini_request():
+    """Create a sample Gemini request."""
+    return LLMRequest(
+        request_id="test-req-gemini",
+        provider=LLMProvider.GEMINI,
+        model="gemini-2.0-flash",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+
+@pytest.fixture
+def deepinfra_request():
+    """Create a sample DeepInfra request."""
+    return LLMRequest(
+        request_id="test-req-deepinfra",
+        provider=LLMProvider.DEEPINFRA,
+        model="meta-llama/Llama-3.3-70B-Instruct",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+
+@pytest.fixture
 def default_config():
     """Create default proxy config."""
     return ProxyConfig()

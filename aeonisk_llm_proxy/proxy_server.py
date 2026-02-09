@@ -12,6 +12,7 @@ from typing import Optional, Dict
 from .models import (
     LLMRequest,
     LLMResponse,
+    LLMProvider,
     RoutingStrategy,
     RequestStatus,
     ProxyConfig,
@@ -441,7 +442,7 @@ class LLMProxyServer:
             "queue_size": self.queue.get_queue_size(),
             "active_batches": len(self.batch_handler.active_batches),
             "providers_healthy": {
-                "openai": bool(self.batch_handler.openai_key),
-                "anthropic": bool(self.batch_handler.anthropic_key),
+                provider.value: bool(self.direct_executor.get_api_key(provider))
+                for provider in LLMProvider
             },
         }

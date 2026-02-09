@@ -36,6 +36,14 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    GROK = "grok"
+    GEMINI = "gemini"
+    DEEPINFRA = "deepinfra"
+
+
+# Providers that support the Batch API (async, 50% cheaper)
+# Others are direct-only (OpenAI-compatible endpoints)
+BATCH_PROVIDERS = frozenset({LLMProvider.OPENAI, LLMProvider.ANTHROPIC})
 
 
 # Request Models
