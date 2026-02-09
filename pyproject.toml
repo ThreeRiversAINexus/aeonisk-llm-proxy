@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aeonisk-llm-proxy"
+version = "1.0.0"
+description = "Smart LLM batching proxy for cost optimization through request batching"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "aiohttp>=3.9.0",
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "requests>=2.31.0",
+    "openai>=1.0.0",
+    "anthropic>=0.71.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+aeonisk-llm-proxy = "aeonisk_llm_proxy.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["aeonisk_llm_proxy*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
