@@ -1,0 +1,67 @@
+@startuml sequence_direct
+!theme plain
+title Direct Request Flow
+
+actor Client
+participant "FastAPI\napi.py" as API
+participant "LLMProxyServer\nproxy_server.py" as Proxy
+participant "ResponseTracker" as Tracker
+participant "RequestRouter" as Router
+participant "DirectExecutor" as Direct
+participant "Provider API" as Provider
+
+Client -> API : POST /v1/chat/completions\n{ provider, model, messages, ... }
+activate API
+
+API -> Proxy : submit_request(request)
+activate Proxy
+
+Proxy -> Tracker : register_request(request)
+activate Tracker
+Tracker --> Proxy : event created
+deactivate Tracker
+
+Proxy -> Router : route(request, queue_size, queue_age)
+activate Router
+
+note right of Router
+  Returns DIRECT when:
+  - provider has no batch API
+  - strategy == "direct"
+  - priority == "high"
+  - queue too old
+  - auto-route prefers direct
+end note
+
+Router --> Proxy : RoutingStrategy.DIRECT
+deactivate Router
+
+Proxy -> Direct : execute(request)
+activate Direct
+
+Direct -> Provider : POST /v1/chat/completions\nor POST /v1/messages
+activate Provider
+
+Provider --> Direct : response JSON
+deactivate Provider
+
+Direct --> Proxy : { content, usage }
+deactivate Direct
+
+Proxy -> Tracker : set_response(LLMResponse)
+activate Tracker
+Tracker --> Tracker : event.set()
+deactivate Tracker
+
+Proxy -> Tracker : wait_for_response(request_id)
+activate Tracker
+Tracker --> Proxy : LLMResponse
+deactivate Tracker
+
+Proxy --> API : LLMResponse
+deactivate Proxy
+
+API --> Client : 200 OK\n{ request_id, status, content, routed_via: "direct", ... }
+deactivate API
+
+@enduml

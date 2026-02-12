@@ -1,0 +1,181 @@
+@startuml classes
+!theme plain
+title aeonisk-llm-proxy — Data Models & Classes
+
+skinparam classAttributeIconSize 0
+
+' ── Enums ──
+
+enum LLMProvider {
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    GROK = "grok"
+    GEMINI = "gemini"
+    DEEPINFRA = "deepinfra"
+}
+
+enum RoutingStrategy {
+    DIRECT = "direct"
+    BATCH = "batch"
+    AUTO = "auto"
+}
+
+enum RequestPriority {
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+}
+
+enum RequestStatus {
+    QUEUED = "queued"
+    BATCHED = "batched"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+}
+
+' ── Request / Response Models ──
+
+class LLMRequest <<Pydantic>> {
+    + request_id : str = uuid4()
+    + provider : LLMProvider
+    + model : str
+    + messages : List[Dict]
+    --
+    + temperature : float?
+    + max_tokens : int?
+    + top_p : float?
+    --
+    + priority : RequestPriority = NORMAL
+    + strategy : RoutingStrategy = AUTO
+    --
+    + created_at : datetime
+    + caller_id : str?
+    + tags : Dict[str, str]
+}
+
+class LLMResponse <<Pydantic>> {
+    + request_id : str
+    + status : RequestStatus
+    + content : str?
+    + usage : Dict?
+    + provider : LLMProvider?
+    + model : str?
+    + completed_at : datetime?
+    + error : str?
+    + routed_via : str?
+    + batch_id : str?
+}
+
+class BatchSubmission <<Pydantic>> {
+    + batch_id : str = uuid4()
+    + provider : LLMProvider
+    + provider_batch_id : str?
+    + request_ids : List[str]
+    + total_requests : int
+    + status : str
+    + created_at : datetime
+    + submitted_at : datetime?
+    + completed_at : datetime?
+    + input_file_path : str?
+    + output_file_path : str?
+}
+
+class ProxyConfig <<Pydantic>> {
+    + batch_threshold : int = 100
+    + max_wait_seconds : int = 300
+    + max_idle_seconds : int = 3600
+    + poll_interval_seconds : int = 60
+    + default_strategy : RoutingStrategy
+    + prefer_batch_api : bool = True
+    + routing_rules : List[RoutingRule]
+    --
+    + {static} from_env() : ProxyConfig
+}
+
+' ── Service Classes ──
+
+class LLMProxyServer {
+    - config : ProxyConfig
+    - queue : BatchQueue
+    - router : RequestRouter
+    - batch_handler : BatchAPIHandler
+    - response_tracker : ResponseTracker
+    - direct_executor : DirectExecutor
+    - stats : ProxyStats
+    --
+    + start()
+    + stop()
+    + submit_request(request, timeout?) : LLMResponse
+    + get_stats() : ProxyStats
+    + get_health() : Dict
+}
+
+class RequestRouter {
+    - config : ProxyConfig
+    --
+    + route(request, queue_size, queue_age) : RoutingStrategy
+}
+
+class BatchQueue {
+    - queues : Dict[(provider, model), List[LLMRequest]]
+    - pending : Dict[str, LLMRequest]
+    - batch_threshold : int
+    - max_wait_seconds : int
+    - max_idle_seconds : int
+    --
+    + enqueue(request) : bool
+    + dequeue(request_id) : LLMRequest?
+    + flush_provider(provider) : List[BatchSubmission]
+    + flush_all()
+    + get_queue_size(provider?) : int
+}
+
+class BatchAPIHandler {
+    - active_batches : Dict[str, BatchSubmission]
+    - poll_interval : int
+    --
+    + submit_batch(submission, requests) : str
+    + start()
+    + stop()
+    + purge_batches(...) : Dict
+}
+
+class DirectExecutor {
+    - api_keys : Dict[str, str]
+    --
+    + execute(request) : Dict
+}
+
+class ResponseTracker {
+    - pending : Dict[str, LLMRequest]
+    - responses : Dict[str, LLMResponse]
+    - events : Dict[str, asyncio.Event]
+    --
+    + register_request(request)
+    + wait_for_response(request_id, timeout?) : LLMResponse?
+    + set_response(response)
+    + set_error(request_id, error)
+    + set_batch_responses(batch_id, responses)
+}
+
+' ── Relationships ──
+
+LLMRequest --> LLMProvider
+LLMRequest --> RoutingStrategy
+LLMRequest --> RequestPriority
+LLMResponse --> RequestStatus
+
+LLMProxyServer *-- RequestRouter
+LLMProxyServer *-- BatchQueue
+LLMProxyServer *-- BatchAPIHandler
+LLMProxyServer *-- ResponseTracker
+LLMProxyServer *-- DirectExecutor
+LLMProxyServer --> ProxyConfig
+
+BatchQueue --> BatchSubmission : creates on flush
+BatchAPIHandler --> BatchSubmission : manages lifecycle
+ResponseTracker --> LLMResponse : stores
+ResponseTracker --> LLMRequest : tracks pending
+
+@enduml

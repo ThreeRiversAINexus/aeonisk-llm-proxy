@@ -1,0 +1,92 @@
+@startuml sequence_batch
+!theme plain
+title Batch Request Flow
+
+actor Client
+participant "FastAPI\napi.py" as API
+participant "LLMProxyServer\nproxy_server.py" as Proxy
+participant "ResponseTracker" as Tracker
+participant "RequestRouter" as Router
+participant "BatchQueue" as Queue
+participant "BatchAPIHandler" as Batch
+participant "Provider\nBatch API" as Provider
+
+== Request Submission ==
+
+Client -> API : POST /v1/chat/completions\n{ provider, model, messages, priority: "low" }
+activate API
+
+API -> Proxy : submit_request(request)
+activate Proxy
+
+Proxy -> Tracker : register_request(request)
+Proxy -> Router : route(request, queue_size, queue_age)
+Router --> Proxy : RoutingStrategy.BATCH
+
+Proxy -> Queue : enqueue(request)
+activate Queue
+Queue --> Proxy : true (queued)
+deactivate Queue
+
+note right of Proxy
+  Proxy now awaits
+  Tracker.wait_for_response()
+  which blocks until the
+  batch completes.
+end note
+
+Proxy -> Tracker : wait_for_response(request_id)
+activate Tracker #lightblue
+
+== Queue Flush (triggered by threshold, timeout, or idle) ==
+
+Queue -> Queue : _auto_flush_loop()\nor threshold reached
+activate Queue
+
+Queue -> Proxy : flush_callback(submission, requests)
+activate Proxy #lightgray
+
+Proxy -> Batch : submit_batch(submission, requests)
+activate Batch
+
+alt OpenAI
+    Batch -> Provider : Upload JSONL file
+    Batch -> Provider : POST /v1/batches
+else Anthropic
+    Batch -> Provider : POST /v1/messages/batches
+end
+
+Provider --> Batch : provider_batch_id
+deactivate Queue
+
+== Polling ==
+
+loop every poll_interval seconds
+    Batch -> Provider : GET batch status
+    Provider --> Batch : { status }
+    note right: status in\nvalidating, in_progress, ...
+end
+
+Provider --> Batch : status = completed / ended
+
+Batch -> Provider : Download results (JSONL)
+Provider --> Batch : results file
+deactivate Batch
+
+== Response Resolution ==
+
+Proxy -> Proxy : _process_batch_results()
+Proxy -> Tracker : set_batch_responses(batch_id, results)
+deactivate Proxy
+
+Tracker --> Tracker : event.set() for each request
+Tracker --> Proxy : LLMResponse
+deactivate Tracker
+
+Proxy --> API : LLMResponse
+deactivate Proxy
+
+API --> Client : 200 OK\n{ request_id, status, content, routed_via: "batch", batch_id, ... }
+deactivate API
+
+@enduml

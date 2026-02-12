@@ -1,0 +1,60 @@
+@startuml state_batch
+!theme plain
+title Batch Lifecycle State Machine
+
+state "Queued" as queued : Requests accumulating\nin BatchQueue\nkeyed by (provider, model)
+
+state "Pending" as pending : BatchSubmission created\nflush_callback invoked
+
+state "Submitted" as submitted : Sent to provider Batch API\nprovider_batch_id assigned\nstate persisted to disk
+
+state "Processing" as processing : Provider is processing\nBatchAPIHandler polling
+
+state "Completed" as completed : Results downloaded\nJSONL parsed\nResponses resolved
+
+state "Failed" as failed : Provider reported failure\nor too many poll errors
+
+state "Expired" as expired : Provider expired the batch\n(e.g. OpenAI 24h window)
+
+[*] --> queued : enqueue()
+
+queued --> pending : flush trigger fires\n(threshold / timeout / idle / manual)
+
+pending --> submitted : submit_batch() succeeds\nprovider returns batch_id
+
+pending --> failed : submit_batch() fails\nafter retries
+
+submitted --> processing : provider starts processing
+
+processing --> completed : provider returns completed/ended\nresults downloaded
+
+processing --> failed : provider returns failed
+processing --> expired : provider returns expired
+
+completed --> [*] : responses resolved\nbatch purged
+failed --> [*] : errors set on all requests\nbatch purged
+expired --> [*] : errors set on all requests\nbatch purged
+
+note right of queued
+  Flush triggers:
+  1. queue size >= BATCH_THRESHOLD
+  2. oldest request age >= BATCH_TIMEOUT
+  3. idle time >= BATCH_MAX_IDLE
+  4. manual POST /queue/flush/{provider}
+end note
+
+note right of submitted
+  State persisted to
+  /tmp/llm_proxy_batches.json
+  for crash recovery.
+  On restart, polling resumes
+  for in-progress batches.
+end note
+
+note right of completed
+  OpenAI: results in JSONL via file download
+  Anthropic: results via /batches/{id}/results
+  Both streamed to disk in chunks.
+end note
+
+@enduml

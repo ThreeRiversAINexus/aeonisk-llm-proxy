@@ -339,10 +339,18 @@ class LLMProxyServer:
                         if not custom_id:
                             continue
 
-                        # Check for error in result
+                        # Check for error in result (OpenAI: top-level "error", Anthropic: result.type == "errored")
                         if result.get("error"):
                             error_msg = result["error"].get("message", "Unknown error")
                             logger.error(f"Request {custom_id} failed: {error_msg}")
+                            await self.response_tracker.set_error(custom_id, error_msg)
+                            continue
+
+                        anthropic_result = result.get("result", {})
+                        if anthropic_result.get("type") == "errored":
+                            nested_error = anthropic_result.get("error", {}).get("error", {})
+                            error_msg = nested_error.get("message", "Unknown Anthropic batch error")
+                            logger.error(f"Request {custom_id} failed (Anthropic): {error_msg}")
                             await self.response_tracker.set_error(custom_id, error_msg)
                             continue
 
@@ -360,7 +368,7 @@ class LLMProxyServer:
                             }
 
                         else:  # anthropic
-                            response_data = result.get("result", {})
+                            response_data = result.get("result", {}).get("message", {})
                             content = response_data.get("content", [{}])[0].get("text")
                             raw_usage = response_data.get("usage", {})
 
@@ -369,6 +377,11 @@ class LLMProxyServer:
                                 "input_tokens": raw_usage.get("input_tokens", 0),
                                 "output_tokens": raw_usage.get("output_tokens", 0),
                             }
+
+                        if not content:
+                            logger.error(f"Request {custom_id}: batch response has no content, marking as error")
+                            await self.response_tracker.set_error(custom_id, "Batch response contained no content")
+                            continue
 
                         results[custom_id] = {
                             "content": content,

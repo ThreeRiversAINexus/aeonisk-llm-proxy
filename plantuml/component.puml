@@ -1,0 +1,73 @@
+@startuml component
+!theme plain
+title aeonisk-llm-proxy — Component Architecture
+
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+actor "Client" as client
+
+package "aeonisk-llm-proxy" {
+
+    component "FastAPI\n(api.py)" as api {
+        portin " POST /v1/chat/completions\n POST /submit\n GET /health\n GET /stats" as endpoints
+    }
+
+    component "LLMProxyServer\n(proxy_server.py)" as proxy
+
+    component "RequestRouter\n(router.py)" as router
+    component "DirectExecutor\n(direct_executor.py)" as direct
+    component "BatchQueue\n(batch_queue.py)" as queue
+    component "BatchAPIHandler\n(batch_handler.py)" as batch
+    component "ResponseTracker\n(response_tracker.py)" as tracker
+
+    database "State File\n/tmp/llm_proxy_batches.json" as state
+}
+
+cloud "LLM Providers" {
+    component "OpenAI API" as openai
+    component "Anthropic API" as anthropic
+    component "Grok API" as grok
+    component "Gemini API" as gemini
+    component "DeepInfra API" as deepinfra
+
+    component "OpenAI Batch API" as openai_batch
+    component "Anthropic Batch API" as anthropic_batch
+}
+
+' Client -> API
+client --> endpoints
+
+' API -> Proxy
+api --> proxy : submit_request()
+
+' Proxy internals
+proxy --> router : route()
+proxy --> direct : execute()
+proxy --> queue : enqueue()
+proxy --> tracker : register / wait
+
+' Router decides
+router ..> direct : strategy=DIRECT
+router ..> queue : strategy=BATCH
+
+' Queue -> Batch
+queue --> batch : flush_callback()
+
+' Direct executor -> providers
+direct --> openai : POST /v1/chat/completions
+direct --> anthropic : POST /v1/messages
+direct --> grok : POST /v1/chat/completions
+direct --> gemini : POST /v1/chat/completions
+direct --> deepinfra : POST /v1/chat/completions
+
+' Batch handler -> batch APIs
+batch --> openai_batch : submit / poll / download
+batch --> anthropic_batch : submit / poll / download
+batch --> state : persist / restore
+
+' Batch -> Tracker
+batch ..> tracker : results via proxy_server
+tracker ..> client : response resolved
+
+@enduml

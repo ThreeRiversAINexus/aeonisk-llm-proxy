@@ -77,6 +77,9 @@ class BatchAPIHandler:
         requests: List[LLMRequest],
     ) -> str:
         """Submit batch to OpenAI Batch API."""
+        if not self.openai_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+
         # 1. Create JSONL file
         batch_file = Path(f"/tmp/openai_batch_{submission.batch_id}.jsonl")
 
@@ -239,17 +242,32 @@ class BatchAPIHandler:
         requests: List[LLMRequest],
     ) -> str:
         """Submit batch to Anthropic Message Batches API."""
+        if not self.anthropic_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+
         # Format requests for Anthropic
         batch_requests = []
         for req in requests:
+            # Anthropic requires system message as top-level param, not in messages array
+            system_content = None
+            non_system_messages = []
+            for msg in req.messages:
+                if msg.get("role") == "system":
+                    system_content = msg.get("content", "")
+                else:
+                    non_system_messages.append(msg)
+
             batch_req = {
                 "custom_id": req.request_id,
                 "params": {
                     "model": req.model,
                     "max_tokens": req.max_tokens or 4096,
-                    "messages": req.messages,
+                    "messages": non_system_messages,
                 },
             }
+
+            if system_content:
+                batch_req["params"]["system"] = system_content
 
             if req.temperature is not None:
                 batch_req["params"]["temperature"] = req.temperature

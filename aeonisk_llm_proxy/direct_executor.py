@@ -112,12 +112,23 @@ class DirectExecutor:
         """Execute Anthropic request."""
         api_key = self.api_keys["ANTHROPIC_API_KEY"]
 
+        # Anthropic requires system message as top-level param, not in messages array
+        system_content = None
+        non_system_messages = []
+        for msg in request.messages:
+            if msg.get("role") == "system":
+                system_content = msg.get("content", "")
+            else:
+                non_system_messages.append(msg)
+
         payload = {
             "model": request.model,
             "max_tokens": request.max_tokens or 4096,
-            "messages": request.messages,
+            "messages": non_system_messages,
         }
 
+        if system_content:
+            payload["system"] = system_content
         if request.temperature is not None:
             payload["temperature"] = request.temperature
         if request.top_p is not None:

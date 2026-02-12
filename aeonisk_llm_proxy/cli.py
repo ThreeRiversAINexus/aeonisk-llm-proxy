@@ -23,23 +23,47 @@ def cli():
 @cli.command('start')
 @click.option('--host', default='0.0.0.0', help='Host to bind to')
 @click.option('--port', default=8000, type=int, help='Port to bind to')
+@click.option('--batch-size', type=int, help='Flush queue when it reaches this many requests [env: BATCH_THRESHOLD, default: 100]')
+@click.option('--flush-interval', type=int, help='Max seconds to wait before flushing the queue [env: BATCH_TIMEOUT, default: 300]')
+@click.option('--idle-timeout', type=int, help='Flush queue after this many idle seconds [env: BATCH_MAX_IDLE, default: 3600]')
+@click.option('--poll-interval', type=int, help='Poll provider batch API every N seconds [env: BATCH_POLL_INTERVAL, default: 60]')
 @click.option('--reload', is_flag=True, help='Enable auto-reload for development')
 @click.option('--log-level', default='info', type=click.Choice(['debug', 'info', 'warning', 'error']))
-def start(host, port, reload, log_level):
+def start(host, port, batch_size, flush_interval, idle_timeout, poll_interval, reload, log_level):
     """Start the LLM batching proxy server.
+
+    Queue tuning: requests are collected per (provider, model) and flushed to
+    the provider batch API when any of these triggers fire:
+
+    \b
+      --batch-size      queue length trigger  (default 100)
+      --flush-interval  max age trigger in s  (default 300)
+      --idle-timeout    no-new-requests flush  (default 3600)
+
+    CLI flags override env vars, which override the built-in defaults.
 
     Examples:
 
-        # Start with defaults (0.0.0.0:8000)
-        python -m aeonisk_llm_proxy start
-
-        # Start on custom port
-        python -m aeonisk_llm_proxy start --port 8080
-
-        # Development mode with auto-reload
-        python -m aeonisk_llm_proxy start --reload --log-level debug
+    \b
+      # Start with defaults
+      aeonisk-llm-proxy start
+      # Flush every 30s or every 20 requests
+      aeonisk-llm-proxy start --flush-interval 30 --batch-size 20
+      # Custom port, debug logging
+      aeonisk-llm-proxy start --port 8080 --log-level debug
     """
+    import os
     import uvicorn
+
+    # CLI flags override env vars
+    if batch_size is not None:
+        os.environ['BATCH_THRESHOLD'] = str(batch_size)
+    if flush_interval is not None:
+        os.environ['BATCH_TIMEOUT'] = str(flush_interval)
+    if idle_timeout is not None:
+        os.environ['BATCH_MAX_IDLE'] = str(idle_timeout)
+    if poll_interval is not None:
+        os.environ['BATCH_POLL_INTERVAL'] = str(poll_interval)
 
     # Configure logging
     logging.basicConfig(
@@ -271,9 +295,9 @@ def status(proxy):
             stats = batch_resp.json()
             if stats.get('batches'):
                 click.echo(f'\nBatches:')
-                for batch in stats['batches']:
+                for batch_id, batch in stats['batches'].items():
                     age = batch.get('age_seconds', 0)
-                    click.echo(f'  - {batch.get("batch_id")}: {batch.get("status")} ({age:.0f}s old)')
+                    click.echo(f'  - {batch_id}: {batch.get("status")} ({age:.0f}s old)')
 
     except requests.exceptions.ConnectionError:
         click.echo(f'Error: Cannot connect to proxy at {proxy}')
