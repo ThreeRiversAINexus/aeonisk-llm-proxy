@@ -104,7 +104,7 @@ class DirectExecutor:
                 data = await resp.json()
 
                 return {
-                    "content": data["choices"][0]["message"]["content"],
+                    "content": (data["choices"][0]["message"]["content"] or "").strip(),
                     "usage": data.get("usage"),
                 }
 
@@ -151,6 +151,6 @@ class DirectExecutor:
                 data = await resp.json()
 
                 return {
-                    "content": data["content"][0]["text"],
+                    "content": (data["content"][0]["text"] or "").strip(),
                     "usage": data.get("usage"),
                 }

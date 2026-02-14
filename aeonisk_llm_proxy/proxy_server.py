@@ -172,11 +172,18 @@ class LLMProxyServer:
         try:
             result = await self.direct_executor.execute(request)
 
+            # Validate content — empty/whitespace-only responses are errors
+            content = result.get("content")
+            if content:
+                content = content.strip()
+            if not content:
+                raise ValueError("Direct API returned empty/whitespace-only content")
+
             # Create response
             response = LLMResponse(
                 request_id=request.request_id,
                 status=RequestStatus.COMPLETED,
-                content=result.get("content"),
+                content=content,
                 usage=result.get("usage"),
                 provider=request.provider,
                 model=request.model,
@@ -358,6 +365,8 @@ class LLMProxyServer:
                         if submission.provider.value == "openai":
                             response_data = result.get("response", {}).get("body", {})
                             content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
+                            if content:
+                                content = content.strip()
                             raw_usage = response_data.get("usage", {})
 
                             # Normalize usage - flatten nested details
@@ -370,6 +379,8 @@ class LLMProxyServer:
                         else:  # anthropic
                             response_data = result.get("result", {}).get("message", {})
                             content = response_data.get("content", [{}])[0].get("text")
+                            if content:
+                                content = content.strip()
                             raw_usage = response_data.get("usage", {})
 
                             # Normalize usage
