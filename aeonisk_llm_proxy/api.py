@@ -18,6 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .proxy_server import LLMProxyServer
 from .models import LLMRequest, LLMResponse, ProxyConfig, ProxyStats, HealthCheck
+from .anthropic_batches import router as anthropic_batches_router, AnthropicBatchProxy
+from . import anthropic_batches
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,10 @@ async def lifespan(app: FastAPI):
     proxy = LLMProxyServer(config=config)
     await proxy.start()
 
+    # Initialize Anthropic batch proxy
+    anthropic_batches.batch_proxy = AnthropicBatchProxy()
+    logger.info("Anthropic batch proxy initialized")
+
     logger.info("LLM proxy server started")
 
     yield
@@ -54,6 +60,7 @@ async def lifespan(app: FastAPI):
     if proxy:
         await proxy.stop()
 
+    anthropic_batches.batch_proxy = None
     logger.info("LLM proxy server stopped")
 
 
@@ -64,6 +71,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Include Anthropic batches router
+app.include_router(anthropic_batches_router)
 
 # Add CORS middleware
 app.add_middleware(
