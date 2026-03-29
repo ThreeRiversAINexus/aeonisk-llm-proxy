@@ -103,8 +103,18 @@ class DirectExecutor:
 
                 data = await resp.json()
 
+                message = data["choices"][0]["message"]
+                content = (message.get("content") or "").strip()
+                if not content:
+                    # Log the full message to diagnose empty/null content
+                    logger.warning(
+                        f"Empty content from {request.provider.value}:{request.model}. "
+                        f"finish_reason={data['choices'][0].get('finish_reason')}, "
+                        f"refusal={message.get('refusal')}, "
+                        f"message_keys={list(message.keys())}"
+                    )
                 return {
-                    "content": (data["choices"][0]["message"]["content"] or "").strip(),
+                    "content": content,
                     "usage": data.get("usage"),
                 }
 
