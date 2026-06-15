@@ -39,6 +39,7 @@ class BatchAPIHandler:
         # API keys
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        self.gemini_key = os.getenv("GEMINI_API_KEY")
 
         # Active batches being polled
         self.active_batches: Dict[str, BatchSubmission] = {}
@@ -68,8 +69,45 @@ class BatchAPIHandler:
             return await self._submit_openai_batch(submission, requests)
         elif submission.provider == LLMProvider.ANTHROPIC:
             return await self._submit_anthropic_batch(submission, requests)
+        elif submission.provider == LLMProvider.GEMINI:
+            return await self._submit_gemini_batch(submission, requests)
         else:
             raise ValueError(f"Unsupported provider: {submission.provider}")
+
+    @staticmethod
+    def _build_gemini_request(request: LLMRequest) -> Dict[str, Any]:
+        """Convert an OpenAI-style request into Gemini GenerateContent format."""
+        system_parts = []
+        contents = []
+
+        for message in request.messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+
+            if role == "system":
+                system_parts.append({"text": content})
+                continue
+
+            contents.append({
+                "role": "model" if role == "assistant" else "user",
+                "parts": [{"text": content}],
+            })
+
+        payload: Dict[str, Any] = {"contents": contents}
+        if system_parts:
+            payload["systemInstruction"] = {"parts": system_parts}
+
+        generation_config = {}
+        if request.temperature is not None:
+            generation_config["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            generation_config["maxOutputTokens"] = request.max_tokens
+        if request.top_p is not None:
+            generation_config["topP"] = request.top_p
+        if generation_config:
+            payload["generationConfig"] = generation_config
+
+        return payload
 
     async def _submit_openai_batch(
         self,
@@ -342,6 +380,105 @@ class BatchAPIHandler:
 
         return provider_batch_id
 
+    async def _submit_gemini_batch(
+        self,
+        submission: BatchSubmission,
+        requests: List[LLMRequest],
+    ) -> str:
+        """Submit an inline Gemini Batch API job."""
+        if not self.gemini_key:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
+        if not requests:
+            raise ValueError("Gemini batch must contain at least one request")
+
+        model = requests[0].model
+        batch_requests = [
+            {
+                "request": self._build_gemini_request(request),
+                "metadata": {"key": request.request_id},
+            }
+            for request in requests
+        ]
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{model}:batchGenerateContent"
+        )
+        payload = {
+            "batch": {
+                "display_name": f"aeonisk-{submission.batch_id}",
+                "input_config": {
+                    "requests": {
+                        "requests": batch_requests,
+                    },
+                },
+            },
+        }
+
+        max_retries = 5
+        retry_delay = 60
+        provider_batch_id = None
+
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        url,
+                        headers={
+                            "x-goog-api-key": self.gemini_key,
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    ) as resp:
+                        if resp.status in [200, 201]:
+                            batch_data = await resp.json()
+                            provider_batch_id = batch_data.get("name")
+                            break
+
+                        error = await resp.text()
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"Gemini batch creation failed (attempt {attempt + 1}/{max_retries}): "
+                                f"{error}. Retrying in {retry_delay}s..."
+                            )
+                            await asyncio.sleep(retry_delay)
+                            retry_delay = min(600, retry_delay * 2)
+                        else:
+                            raise Exception(
+                                f"Gemini batch creation failed after {max_retries} attempts: {error}"
+                            )
+            except aiohttp.ClientError as e:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Network error during Gemini batch creation "
+                        f"(attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {retry_delay}s..."
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(600, retry_delay * 2)
+                else:
+                    raise Exception(
+                        f"Gemini batch creation failed after {max_retries} attempts: {e}"
+                    )
+
+        if not provider_batch_id:
+            raise Exception("Gemini batch creation failed: no batch name returned")
+
+        logger.info(
+            f"Submitted Gemini batch {submission.batch_id} "
+            f"(provider ID: {provider_batch_id}, {len(requests)} requests)"
+        )
+        submission.provider_batch_id = provider_batch_id
+        submission.status = "submitted"
+        submission.submitted_at = datetime.utcnow()
+        self.active_batches[submission.batch_id] = submission
+        self._save_state()
+
+        task = asyncio.create_task(
+            self._poll_gemini_batch(submission.batch_id, provider_batch_id)
+        )
+        self.poll_tasks[submission.batch_id] = task
+        return provider_batch_id
+
     async def _poll_openai_batch(self, batch_id: str, provider_batch_id: str):
         """Poll OpenAI batch until completion."""
         consecutive_errors = 0
@@ -477,6 +614,116 @@ class BatchAPIHandler:
                 # Exponential backoff for other errors too
                 backoff = min(300, self.poll_interval * (2 ** (consecutive_errors - 1)))
                 await asyncio.sleep(backoff)
+
+    async def _poll_gemini_batch(self, batch_id: str, provider_batch_id: str):
+        """Poll a Gemini batch operation until it reaches a terminal state."""
+        consecutive_errors = 0
+        terminal_states = {
+            "JOB_STATE_SUCCEEDED",
+            "JOB_STATE_FAILED",
+            "JOB_STATE_CANCELLED",
+            "JOB_STATE_EXPIRED",
+        }
+
+        while True:
+            try:
+                await asyncio.sleep(self.poll_interval)
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        "https://generativelanguage.googleapis.com/v1beta/"
+                        f"{provider_batch_id}",
+                        headers={"x-goog-api-key": self.gemini_key},
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.error(f"Failed to get Gemini batch status: {await resp.text()}")
+                            consecutive_errors += 1
+                            if consecutive_errors >= 10:
+                                submission = self.active_batches.get(batch_id)
+                                if submission:
+                                    submission.status = "failed"
+                                    self._save_state()
+                                break
+                            continue
+                        batch_data = await resp.json()
+                        state = (
+                            batch_data.get("metadata", {}).get("state")
+                            or batch_data.get("state")
+                        )
+                        consecutive_errors = 0
+
+                submission = self.active_batches[batch_id]
+                if state == "JOB_STATE_SUCCEEDED":
+                    await self._write_gemini_results(batch_id, batch_data)
+                    break
+                if state in terminal_states:
+                    submission.status = state.removeprefix("JOB_STATE_").lower()
+                    self._save_state()
+                    break
+                submission.status = state or "processing"
+                self._save_state()
+
+            except Exception as e:
+                consecutive_errors += 1
+                logger.error(
+                    f"Error polling Gemini batch {batch_id} (attempt {consecutive_errors}/10): {e}",
+                    exc_info=True,
+                )
+                if consecutive_errors >= 10:
+                    submission = self.active_batches.get(batch_id)
+                    if submission:
+                        submission.status = "failed"
+                        self._save_state()
+                    break
+                await asyncio.sleep(min(300, self.poll_interval * (2 ** (consecutive_errors - 1))))
+
+    async def _write_gemini_results(self, batch_id: str, batch_data: Dict[str, Any]):
+        """Normalize inline Gemini batch results into the proxy JSONL format."""
+        responses = (
+            batch_data.get("response", {}).get("inlinedResponses")
+            or batch_data.get("dest", {}).get("inlinedResponses")
+            or []
+        )
+        submission = self.active_batches.get(batch_id)
+        if not submission:
+            logger.error(f"Gemini batch {batch_id} is not active")
+            return
+        if not responses:
+            submission.status = "failed"
+            self._save_state()
+            logger.error(f"Gemini batch {batch_id} succeeded without inline results")
+            return
+
+        output_file = Path(f"/tmp/gemini_batch_{batch_id}_results.jsonl")
+        try:
+            with open(output_file, "w") as f:
+                for index, inline_response in enumerate(responses):
+                    metadata = inline_response.get("metadata", {})
+                    custom_id = metadata.get("key")
+                    if not custom_id and index < len(submission.request_ids):
+                        custom_id = submission.request_ids[index]
+
+                    normalized = {"custom_id": custom_id}
+                    if inline_response.get("error"):
+                        normalized["error"] = inline_response["error"]
+                    else:
+                        normalized["gemini_response"] = inline_response.get("response", {})
+                    f.write(json.dumps(normalized) + "\n")
+
+            submission.output_file_path = str(output_file)
+            submission.completed_at = datetime.utcnow()
+            submission.status = "completed"
+            self._save_state()
+            logger.info(
+                f"Wrote {len(responses)} Gemini results for batch {batch_id} to {output_file}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Error writing Gemini results for batch {batch_id}: {e}",
+                exc_info=True,
+            )
+            if output_file.exists():
+                output_file.unlink()
 
     async def _download_openai_results(self, batch_id: str, batch_data: Dict):
         """Download and process OpenAI batch results."""
@@ -642,6 +889,11 @@ class BatchAPIHandler:
                     elif submission.provider == LLMProvider.ANTHROPIC:
                         task = asyncio.create_task(
                             self._poll_anthropic_batch(batch_id, submission.provider_batch_id)
+                        )
+                        self.poll_tasks[batch_id] = task
+                    elif submission.provider == LLMProvider.GEMINI:
+                        task = asyncio.create_task(
+                            self._poll_gemini_batch(batch_id, submission.provider_batch_id)
                         )
                         self.poll_tasks[batch_id] = task
 

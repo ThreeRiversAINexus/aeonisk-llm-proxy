@@ -1,0 +1,86 @@
+"""Tests for provider-specific batch request and result normalization."""
+
+import json
+
+import pytest
+
+from aeonisk_llm_proxy.batch_handler import BatchAPIHandler
+from aeonisk_llm_proxy.models import BatchSubmission, LLMProvider, LLMRequest
+
+
+def test_build_gemini_request_maps_messages_and_generation_config():
+    request = LLMRequest(
+        provider=LLMProvider.GEMINI,
+        model="gemini-3.1-flash-lite",
+        messages=[
+            {"role": "system", "content": "Follow the game rules."},
+            {"role": "user", "content": "Declare an action."},
+            {"role": "assistant", "content": "I take cover."},
+        ],
+        temperature=0.7,
+        max_tokens=512,
+        top_p=0.9,
+    )
+
+    payload = BatchAPIHandler._build_gemini_request(request)
+
+    assert payload["systemInstruction"]["parts"] == [
+        {"text": "Follow the game rules."}
+    ]
+    assert payload["contents"] == [
+        {"role": "user", "parts": [{"text": "Declare an action."}]},
+        {"role": "model", "parts": [{"text": "I take cover."}]},
+    ]
+    assert payload["generationConfig"] == {
+        "temperature": 0.7,
+        "maxOutputTokens": 512,
+        "topP": 0.9,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result_container", ["response", "dest"])
+async def test_write_gemini_results_uses_metadata_and_order_fallback(
+    tmp_path, monkeypatch, result_container
+):
+    state_file = tmp_path / "state.json"
+    handler = BatchAPIHandler(state_file=str(state_file))
+    submission = BatchSubmission(
+        batch_id="batch-1",
+        provider=LLMProvider.GEMINI,
+        request_ids=["request-1", "request-2"],
+        total_requests=2,
+    )
+    handler.active_batches[submission.batch_id] = submission
+
+    monkeypatch.setattr(
+        "aeonisk_llm_proxy.batch_handler.Path",
+        lambda path: tmp_path / path.rsplit("/", 1)[-1],
+    )
+
+    await handler._write_gemini_results(
+        submission.batch_id,
+        {
+            result_container: {
+                "inlinedResponses": [
+                    {
+                        "metadata": {"key": "request-1"},
+                        "response": {"candidates": []},
+                    },
+                    {
+                        "error": {"message": "blocked"},
+                    },
+                ],
+            },
+        },
+    )
+
+    with open(submission.output_file_path) as f:
+        lines = [json.loads(line) for line in f if line.strip()]
+
+    assert lines[0]["custom_id"] == "request-1"
+    assert lines[1] == {
+        "custom_id": "request-2",
+        "error": {"message": "blocked"},
+    }
+    assert submission.status == "completed"

@@ -26,7 +26,7 @@ Your application sends a single HTTP POST. The proxy decides the cheapest path, 
 | OpenAI | yes | yes | `OPENAI_API_KEY` | gpt-4o, gpt-5, o3 |
 | Anthropic | yes | yes | `ANTHROPIC_API_KEY` | claude-sonnet-4-5, claude-opus-4-6 |
 | Grok (xAI) | yes | -- | `XAI_API_KEY` | grok-3 |
-| Gemini | yes | -- | `GEMINI_API_KEY` | gemini-2.5-pro |
+| Gemini | yes | yes | `GEMINI_API_KEY` | gemini-3.1-flash-lite, gemini-2.5-pro |
 | DeepInfra | yes | -- | `DEEPINFRA_API_KEY` | meta-llama/Llama-3.3-70B-Instruct-Turbo |
 
 Providers without a Batch API are always routed directly.
@@ -132,7 +132,7 @@ Every request accepts two routing hints that together determine the execution pa
 |-------|----------|
 | `auto` (default) | Proxy decides based on priority, queue state, and config |
 | `direct` | Always send immediately via real-time API |
-| `batch` | Always queue for Batch API (OpenAI & Anthropic only) |
+| `batch` | Always queue for Batch API (OpenAI, Anthropic, and Gemini) |
 
 **`priority`** -- influences the `auto` strategy:
 
@@ -142,7 +142,7 @@ Every request accepts two routing hints that together determine the execution pa
 | `normal` (default) | Auto-routed; will batch when the proxy prefers it |
 | `low` | Always batched when the provider supports it |
 
-Providers without a Batch API (Grok, Gemini, DeepInfra) are always sent direct regardless of these hints.
+Providers without a Batch API (Grok and DeepInfra) are always sent direct regardless of these hints.
 
 ### Client Examples
 
@@ -230,15 +230,27 @@ curl -s http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-**Gemini (Google)** -- direct only:
+**Gemini (Google)** -- supports both direct and batch:
 
 ```bash
+# Direct
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "gemini",
-    "model": "gemini-2.5-pro",
-    "messages": [{"role": "user", "content": "Write a haiku about code."}]
+    "model": "gemini-3.1-flash-lite",
+    "messages": [{"role": "user", "content": "Write a haiku about code."}],
+    "strategy": "direct"
+  }'
+
+# Batch (50% cheaper)
+curl -s http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "gemini",
+    "model": "gemini-3.1-flash-lite",
+    "messages": [{"role": "user", "content": "Summarize this document."}],
+    "priority": "low"
   }'
 ```
 
@@ -254,7 +266,7 @@ curl -s http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-> For Grok, Gemini, and DeepInfra, `strategy` and `priority` hints are accepted but ignored -- these providers always route direct since they have no Batch API.
+> For Grok and DeepInfra, `strategy` and `priority` hints are accepted but ignored -- these providers always route direct since they have no Batch API.
 
 ---
 
@@ -604,7 +616,7 @@ aeonisk-llm-proxy start \
    - Oldest request exceeds `BATCH_TIMEOUT` seconds
    - No new requests arrive for `BATCH_MAX_IDLE` seconds
    - Manual flush via `POST /queue/flush/{provider}`
-6. Flushed requests are submitted to the provider's Batch API (OpenAI or Anthropic).
+6. Flushed requests are submitted to the provider's Batch API (OpenAI, Anthropic, or Gemini).
 7. The **BatchAPIHandler** polls the provider for completion, downloads JSONL results, and the **ResponseTracker** resolves each waiting caller's response.
 8. Batch state is persisted to `/tmp/llm_proxy_batches.json` for crash recovery.
 

@@ -346,9 +346,14 @@ class LLMProxyServer:
                         if not custom_id:
                             continue
 
-                        # Check for error in result (OpenAI: top-level "error", Anthropic: result.type == "errored")
+                        # Check for provider-normalized or provider-native errors.
                         if result.get("error"):
-                            error_msg = result["error"].get("message", "Unknown error")
+                            error = result["error"]
+                            error_msg = (
+                                error.get("message", "Unknown error")
+                                if isinstance(error, dict)
+                                else str(error)
+                            )
                             logger.error(f"Request {custom_id} failed: {error_msg}")
                             await self.response_tracker.set_error(custom_id, error_msg)
                             continue
@@ -362,7 +367,7 @@ class LLMProxyServer:
                             continue
 
                         # Extract response data
-                        if submission.provider.value == "openai":
+                        if submission.provider == LLMProvider.OPENAI:
                             response_data = result.get("response", {}).get("body", {})
                             content = response_data.get("choices", [{}])[0].get("message", {}).get("content")
                             if content:
@@ -376,7 +381,7 @@ class LLMProxyServer:
                                 "total_tokens": raw_usage.get("total_tokens", 0),
                             }
 
-                        else:  # anthropic
+                        elif submission.provider == LLMProvider.ANTHROPIC:
                             response_data = result.get("result", {}).get("message", {})
                             content = response_data.get("content", [{}])[0].get("text")
                             if content:
@@ -387,6 +392,25 @@ class LLMProxyServer:
                             usage = {
                                 "input_tokens": raw_usage.get("input_tokens", 0),
                                 "output_tokens": raw_usage.get("output_tokens", 0),
+                            }
+
+                        else:  # Gemini
+                            response_data = result.get("gemini_response", {})
+                            candidates = response_data.get("candidates", [])
+                            parts = (
+                                candidates[0].get("content", {}).get("parts", [])
+                                if candidates else []
+                            )
+                            content = "".join(
+                                part.get("text", "")
+                                for part in parts
+                                if isinstance(part, dict)
+                            ).strip()
+                            raw_usage = response_data.get("usageMetadata", {})
+                            usage = {
+                                "prompt_tokens": raw_usage.get("promptTokenCount", 0),
+                                "completion_tokens": raw_usage.get("candidatesTokenCount", 0),
+                                "total_tokens": raw_usage.get("totalTokenCount", 0),
                             }
 
                         if not content:

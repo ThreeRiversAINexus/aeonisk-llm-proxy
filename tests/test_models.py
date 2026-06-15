@@ -59,11 +59,11 @@ class TestEnums:
 class TestBatchProviders:
     """Test BATCH_PROVIDERS constant."""
 
-    def test_only_openai_and_anthropic_support_batch(self):
+    def test_native_batch_providers(self):
         assert LLMProvider.OPENAI in BATCH_PROVIDERS
         assert LLMProvider.ANTHROPIC in BATCH_PROVIDERS
+        assert LLMProvider.GEMINI in BATCH_PROVIDERS
         assert LLMProvider.GROK not in BATCH_PROVIDERS
-        assert LLMProvider.GEMINI not in BATCH_PROVIDERS
         assert LLMProvider.DEEPINFRA not in BATCH_PROVIDERS
 
 
