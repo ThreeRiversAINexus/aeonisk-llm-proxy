@@ -109,6 +109,27 @@ class BatchAPIHandler:
 
         return payload
 
+    @staticmethod
+    def _extract_gemini_response_data(response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract normalized text and usage from a Gemini response payload."""
+        candidates = response_data.get("candidates", [])
+        parts = (
+            candidates[0].get("content", {}).get("parts", [])
+            if candidates else []
+        )
+        content = "".join(
+            part.get("text", "")
+            for part in parts
+            if isinstance(part, dict)
+        ).strip()
+        raw_usage = response_data.get("usageMetadata", {})
+        usage = {
+            "prompt_tokens": raw_usage.get("promptTokenCount", 0),
+            "completion_tokens": raw_usage.get("candidatesTokenCount", 0),
+            "total_tokens": raw_usage.get("totalTokenCount", 0),
+        }
+        return {"content": content, "usage": usage}
+
     async def _submit_openai_batch(
         self,
         submission: BatchSubmission,
@@ -728,7 +749,11 @@ class BatchAPIHandler:
                     if inline_response.get("error"):
                         normalized["error"] = inline_response["error"]
                     else:
-                        normalized["gemini_response"] = inline_response.get("response", {})
+                        response_data = inline_response.get("response", {})
+                        gemini_fields = self._extract_gemini_response_data(response_data)
+                        normalized.update(gemini_fields)
+                        normalized["provider"] = submission.provider.value
+                        normalized["gemini_response"] = response_data
                     f.write(json.dumps(normalized) + "\n")
 
             submission.output_file_path = str(output_file)

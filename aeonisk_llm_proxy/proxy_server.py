@@ -395,23 +395,19 @@ class LLMProxyServer:
                             }
 
                         else:  # Gemini
+                            content = result.get("content")
+                            usage = result.get("usage")
+
                             response_data = result.get("gemini_response", {})
-                            candidates = response_data.get("candidates", [])
-                            parts = (
-                                candidates[0].get("content", {}).get("parts", [])
-                                if candidates else []
-                            )
-                            content = "".join(
-                                part.get("text", "")
-                                for part in parts
-                                if isinstance(part, dict)
-                            ).strip()
-                            raw_usage = response_data.get("usageMetadata", {})
-                            usage = {
-                                "prompt_tokens": raw_usage.get("promptTokenCount", 0),
-                                "completion_tokens": raw_usage.get("candidatesTokenCount", 0),
-                                "total_tokens": raw_usage.get("totalTokenCount", 0),
-                            }
+                            if not content or not usage:
+                                gemini_fields = BatchAPIHandler._extract_gemini_response_data(response_data)
+                                if not content:
+                                    content = gemini_fields["content"]
+                                if not usage:
+                                    usage = gemini_fields["usage"]
+
+                            if content:
+                                content = content.strip()
 
                         if not content:
                             logger.error(f"Request {custom_id}: batch response has no content, marking as error")

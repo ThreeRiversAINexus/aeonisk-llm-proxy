@@ -65,7 +65,20 @@ async def test_write_gemini_results_uses_metadata_and_order_fallback(
                 "inlinedResponses": [
                     {
                         "metadata": {"key": "request-1"},
-                        "response": {"candidates": []},
+                        "response": {
+                            "candidates": [
+                                {
+                                    "content": {
+                                        "parts": [{"text": "hello from batch"}]
+                                    }
+                                }
+                            ],
+                            "usageMetadata": {
+                                "promptTokenCount": 3,
+                                "candidatesTokenCount": 5,
+                                "totalTokenCount": 8,
+                            },
+                        },
                     },
                     {
                         "error": {"message": "blocked"},
@@ -79,6 +92,14 @@ async def test_write_gemini_results_uses_metadata_and_order_fallback(
         lines = [json.loads(line) for line in f if line.strip()]
 
     assert lines[0]["custom_id"] == "request-1"
+    assert lines[0]["content"] == "hello from batch"
+    assert lines[0]["usage"] == {
+        "prompt_tokens": 3,
+        "completion_tokens": 5,
+        "total_tokens": 8,
+    }
+    assert lines[0]["provider"] == "gemini"
+    assert lines[0]["gemini_response"]["candidates"][0]["content"]["parts"][0]["text"] == "hello from batch"
     assert lines[1] == {
         "custom_id": "request-2",
         "error": {"message": "blocked"},
@@ -181,4 +202,5 @@ async def test_write_gemini_results_parses_string_entries(tmp_path, monkeypatch)
         lines = [json.loads(line) for line in f if line.strip()]
 
     assert lines[0]["custom_id"] == "request-1"
+    assert lines[0]["content"] == "ok"
     assert lines[0]["gemini_response"]["candidates"][0]["content"]["parts"][0]["text"] == "ok"
