@@ -195,10 +195,18 @@ async def flush_queue(provider: str):
 
     try:
         provider_enum = LLMProvider(provider)
-        submission = await proxy.queue.flush_provider(provider_enum)
+        submissions = await proxy.queue.flush_provider(provider_enum)
 
-        if submission:
-            return {"message": f"Flushed queue for {provider}", "batch_id": submission.batch_id}
+        if submissions:
+            batch_ids = [submission.batch_id for submission in submissions]
+            response = {
+                "message": f"Flushed queue for {provider}",
+                "batch_ids": batch_ids,
+                "count": len(batch_ids),
+            }
+            if len(batch_ids) == 1:
+                response["batch_id"] = batch_ids[0]
+            return response
         else:
             return {"message": f"No requests in queue for {provider}"}
 

@@ -84,3 +84,101 @@ async def test_write_gemini_results_uses_metadata_and_order_fallback(
         "error": {"message": "blocked"},
     }
     assert submission.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_poll_gemini_batch_accepts_batch_state_succeeded(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    handler = BatchAPIHandler(state_file=str(state_file))
+    submission = BatchSubmission(
+        batch_id="batch-2",
+        provider=LLMProvider.GEMINI,
+        provider_batch_id="provider-batch",
+        request_ids=["request-1"],
+        total_requests=1,
+        status="submitted",
+    )
+    handler.active_batches[submission.batch_id] = submission
+
+    async def fake_sleep(_seconds):
+        return None
+
+    class FakeResponse:
+        status = 200
+
+        async def json(self):
+            return {
+                "state": "BATCH_STATE_SUCCEEDED",
+                "response": {
+                    "inlinedResponses": [
+                        {
+                            "metadata": {"key": "request-1"},
+                            "response": {"candidates": []},
+                        }
+                    ]
+                },
+            }
+
+        async def text(self):
+            return ""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            raise AssertionError("poll test should not submit")
+
+        def get(self, *args, **kwargs):
+            return FakeResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("aeonisk_llm_proxy.batch_handler.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("aeonisk_llm_proxy.batch_handler.aiohttp.ClientSession", FakeSession)
+
+    await handler._poll_gemini_batch(submission.batch_id, submission.provider_batch_id)
+
+    assert submission.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_write_gemini_results_parses_string_entries(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    handler = BatchAPIHandler(state_file=str(state_file))
+    submission = BatchSubmission(
+        batch_id="batch-3",
+        provider=LLMProvider.GEMINI,
+        request_ids=["request-1"],
+        total_requests=1,
+    )
+    handler.active_batches[submission.batch_id] = submission
+
+    monkeypatch.setattr(
+        "aeonisk_llm_proxy.batch_handler.Path",
+        lambda path: tmp_path / path.rsplit("/", 1)[-1],
+    )
+
+    await handler._write_gemini_results(
+        submission.batch_id,
+        {
+            "response": {
+                "inlinedResponses": [
+                    "{\"metadata\":{\"key\":\"request-1\"},\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]}}]}}"
+                ]
+            }
+        },
+    )
+
+    with open(submission.output_file_path) as f:
+        lines = [json.loads(line) for line in f if line.strip()]
+
+    assert lines[0]["custom_id"] == "request-1"
+    assert lines[0]["gemini_response"]["candidates"][0]["content"]["parts"][0]["text"] == "ok"

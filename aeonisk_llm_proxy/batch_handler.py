@@ -620,9 +620,13 @@ class BatchAPIHandler:
         consecutive_errors = 0
         terminal_states = {
             "JOB_STATE_SUCCEEDED",
+            "BATCH_STATE_SUCCEEDED",
             "JOB_STATE_FAILED",
+            "BATCH_STATE_FAILED",
             "JOB_STATE_CANCELLED",
+            "BATCH_STATE_CANCELLED",
             "JOB_STATE_EXPIRED",
+            "BATCH_STATE_EXPIRED",
         }
 
         while True:
@@ -653,7 +657,7 @@ class BatchAPIHandler:
                         consecutive_errors = 0
 
                 submission = self.active_batches[batch_id]
-                if state == "JOB_STATE_SUCCEEDED":
+                if state in {"JOB_STATE_SUCCEEDED", "BATCH_STATE_SUCCEEDED"}:
                     await self._write_gemini_results(batch_id, batch_data)
                     break
                 if state in terminal_states:
@@ -698,6 +702,23 @@ class BatchAPIHandler:
         try:
             with open(output_file, "w") as f:
                 for index, inline_response in enumerate(responses):
+                    if isinstance(inline_response, str):
+                        try:
+                            parsed = json.loads(inline_response)
+                            inline_response = parsed if isinstance(parsed, dict) else {"response": parsed}
+                        except json.JSONDecodeError:
+                            inline_response = {
+                                "response": {
+                                    "candidates": [
+                                        {
+                                            "content": {
+                                                "parts": [{"text": inline_response}],
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+
                     metadata = inline_response.get("metadata", {})
                     custom_id = metadata.get("key")
                     if not custom_id and index < len(submission.request_ids):
