@@ -22,7 +22,7 @@ def cli():
 
 @cli.command('start')
 @click.option('--host', default='0.0.0.0', help='Host to bind to')
-@click.option('--port', default=8000, type=int, help='Port to bind to')
+@click.option('--port', default=9090, type=int, help='Port to bind to')
 @click.option('--batch-size', type=int, help='Flush queue when it reaches this many requests [env: BATCH_THRESHOLD, default: 100]')
 @click.option('--flush-interval', type=int, help='Max seconds to wait before flushing the queue [env: BATCH_TIMEOUT, default: 300]')
 @click.option('--idle-timeout', type=int, help='Flush queue after this many idle seconds [env: BATCH_MAX_IDLE, default: 3600]')
@@ -88,7 +88,7 @@ def start(host, port, batch_size, flush_interval, idle_timeout, poll_interval, r
 @click.option('--status', help='Only purge batches with this status (comma-separated: completed,failed,expired)')
 @click.option('--batch-id', multiple=True, help='Specific batch ID(s) to purge')
 @click.option('--keep-files', is_flag=True, help='Keep temp files (input/output JSONL)')
-@click.option('--proxy', default='http://localhost:8000', help='LLM proxy server URL')
+@click.option('--proxy', default='http://localhost:9090', help='LLM proxy server URL')
 @click.option('--local', is_flag=True, help='Purge directly from state file (no running proxy required)')
 @click.option('--dry-run', is_flag=True, help='Show what would be purged without actually purging')
 def purge(older_than, status, batch_id, keep_files, proxy, local, dry_run):
@@ -260,7 +260,7 @@ def _purge_via_api(older_than, status, batch_id, keep_files, proxy, dry_run):
 
 
 @cli.command('status')
-@click.option('--proxy', default='http://localhost:8000', help='LLM proxy server URL')
+@click.option('--proxy', default='http://localhost:9090', help='LLM proxy server URL')
 def status(proxy):
     """Show proxy status and batch statistics.
 
