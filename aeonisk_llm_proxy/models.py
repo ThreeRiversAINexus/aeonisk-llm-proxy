@@ -63,6 +63,7 @@ class LLMRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
+    response_format: Optional[Dict[str, Any]] = None  # e.g. {"type": "json_object"}
 
     # Routing hints
     priority: RequestPriority = RequestPriority.NORMAL
