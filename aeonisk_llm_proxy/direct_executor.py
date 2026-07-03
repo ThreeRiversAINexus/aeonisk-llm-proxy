@@ -88,7 +88,24 @@ class DirectExecutor:
         if request.top_p is not None:
             payload["top_p"] = request.top_p
 
-        async with aiohttp.ClientSession() as session:
+        if request.response_format is not None:
+            payload["response_format"] = request.response_format
+
+        # DeepInfra reasoning models (GLM-5.x, DeepSeek) emit chain-of-thought that
+        # consumes the token budget and returns empty content unless effort is capped.
+        # Mirrors the direct-path fix in the pipeline's ai_client. Default 'none'.
+        if request.provider == LLMProvider.DEEPINFRA:
+            effort = os.getenv("DEEPINFRA_REASONING_EFFORT", "none")
+            if effort:
+                payload["reasoning_effort"] = effort
+
+        # aiohttp defaults to a 300s total timeout, which kills large-context
+        # calls (e.g. GLM-5.1 planning over a 20-round, 130k-token log). Allow a
+        # generous, configurable ceiling instead.
+        direct_timeout = int(os.getenv("PROXY_DIRECT_TIMEOUT", "1200"))
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=direct_timeout)
+        ) as session:
             async with session.post(
                 f"{base_url}/chat/completions",
                 headers={

@@ -255,17 +255,17 @@ class TestAutoRouting:
 
 
 class TestDirectOnlyProviders:
-    """Test that direct-only providers (no batch API) always route DIRECT."""
+    """Test that providers without a native batch API always route DIRECT."""
 
     def test_grok_always_direct(self):
         router = RequestRouter()
         req = make_request(provider=LLMProvider.GROK, model="grok-3")
         assert router.route(req) == RoutingStrategy.DIRECT
 
-    def test_gemini_always_direct(self):
+    def test_gemini_uses_batch(self):
         router = RequestRouter()
         req = make_request(provider=LLMProvider.GEMINI, model="gemini-2.0-flash")
-        assert router.route(req) == RoutingStrategy.DIRECT
+        assert router.route(req) == RoutingStrategy.BATCH
 
     def test_deepinfra_always_direct(self):
         router = RequestRouter()

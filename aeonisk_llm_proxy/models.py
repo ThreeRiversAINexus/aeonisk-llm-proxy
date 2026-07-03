@@ -41,9 +41,13 @@ class LLMProvider(str, Enum):
     DEEPINFRA = "deepinfra"
 
 
-# Providers that support the Batch API (async, 50% cheaper)
-# Others are direct-only (OpenAI-compatible endpoints)
-BATCH_PROVIDERS = frozenset({LLMProvider.OPENAI, LLMProvider.ANTHROPIC})
+# Providers that support a native Batch API (async, 50% cheaper).
+# Others are direct-only (OpenAI-compatible endpoints).
+BATCH_PROVIDERS = frozenset({
+    LLMProvider.OPENAI,
+    LLMProvider.ANTHROPIC,
+    LLMProvider.GEMINI,
+})
 
 
 # Request Models
@@ -59,6 +63,7 @@ class LLMRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
+    response_format: Optional[Dict[str, Any]] = None  # e.g. {"type": "json_object"}
 
     # Routing hints
     priority: RequestPriority = RequestPriority.NORMAL

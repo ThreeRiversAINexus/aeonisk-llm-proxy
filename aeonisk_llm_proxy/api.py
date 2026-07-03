@@ -195,10 +195,18 @@ async def flush_queue(provider: str):
 
     try:
         provider_enum = LLMProvider(provider)
-        submission = await proxy.queue.flush_provider(provider_enum)
+        submissions = await proxy.queue.flush_provider(provider_enum)
 
-        if submission:
-            return {"message": f"Flushed queue for {provider}", "batch_id": submission.batch_id}
+        if submissions:
+            batch_ids = [submission.batch_id for submission in submissions]
+            response = {
+                "message": f"Flushed queue for {provider}",
+                "batch_ids": batch_ids,
+                "count": len(batch_ids),
+            }
+            if len(batch_ids) == 1:
+                response["batch_id"] = batch_ids[0]
+            return response
         else:
             return {"message": f"No requests in queue for {provider}"}
 
@@ -339,7 +347,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
-        port=8000,
+        port=9090,
         reload=False,
         log_level="info",
     )
